@@ -1,0 +1,68 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### 操作系统生成的文件 (必加，否则队友会想打人) ###
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+### 运行日志 (必加，微服务日志很多，不要提交) ###
+logs/
+log/
+*.log
+*.log.gz
+*.log.zip
+
+### 编译输出的补漏 ###
+out/
+*.class
+
+### 敏感信息与本地环境配置 (防止密码泄露) ###
+# 如果你以后用 Docker Compose 的环境变量文件
+.env
+# 如果你有本地的密钥文件
+*.pem
+*.key
+# 避免提交本地为了测试改写的配置文件
+application.yml
+bootstrap.yml
+
+.gitignore
+
+### 纯 Maven 项目补充 ###
+dependency-reduced-pom.xml
