@@ -2,6 +2,8 @@ package com.platform.competition.controller;
 
 import com.platform.common.api.R;
 import com.platform.competition.utils.MinioUtils;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -14,14 +16,14 @@ import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/file")
-@Tag(name = "通用资源", description = "文件上传服务")
+@Api(tags = "通用资源")
 public class CommonFileController {
 
     @Autowired
     private MinioUtils minioUtils;
 
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
-    @Operation(summary = "上传文件", description = "上传图片/附件到MinIO")
+    @ApiOperation(value = "上传文件")
     public R<String> upload(
             @Parameter(description = "文件对象", required = true)
             @RequestParam("file") MultipartFile file,

@@ -25,6 +25,9 @@ public class Competition {
     @Schema(description = "状态: 0:待审核, 1:已发布, 2:已驳回, 3:已结束")
     private Integer status;
 
+    @Schema(description = "驳回理由") // 新增字段
+    private String rejectReason;
+
     @Schema(description = "报名开始时间")
     private LocalDateTime regStartTime;
 
