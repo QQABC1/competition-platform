@@ -3,6 +3,7 @@ package com.platform.competition.controller;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.platform.common.api.R;
+import com.platform.competition.dto.CompetitionAuditDTO;
 import com.platform.competition.entity.Competition;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionAuditVO;
@@ -13,10 +14,8 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.Parameters;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/admin")
@@ -43,5 +42,13 @@ public class AdminController {
         IPage<CompetitionAuditVO> result = competitionService.getPendingAuditList(pageParam);
 
         return R.ok(result);
+    }
+    @PostMapping("/audit/review")
+    @ApiOperation(value = "提交审核结果")
+    public R<Void> auditReview(@RequestBody @Validated CompetitionAuditDTO dto) {
+
+        competitionService.auditCompetition(dto);
+
+        return R.ok();
     }
 }

@@ -11,6 +11,16 @@
     <!-- 1. 声明为父POM，管理子模块 -->
     <packaging>pom</packaging>
 
+    <!-- 3. 子模块列表 -->
+    <modules>
+        <module>competition-common</module>
+        <module>competition-user-service</module>
+        <module>competition-competition-service</module>
+        <module>competition-registration-service</module>
+        <module>competition-notification-service</module>
+        <module>competition-gateway</module>
+    </modules>
+
     <!-- 2. 配置阿里云仓库，加速国内依赖下载 -->
     <repositories>
         <repository>
@@ -31,15 +41,7 @@
         </pluginRepository>
     </pluginRepositories>
 
-    <!-- 3. 子模块列表 -->
-    <modules>
-        <module>competition-common</module>
-        <module>competition-user-service</module>
-        <module>competition-competition-service</module>
-        <module>competition-registration-service</module>
-        <module>competition-notification-service</module>
-        <module>competition-gateway</module>
-    </modules>
+
 
     <!-- 4. 依赖管理：统一版本，避免冲突 -->
     <!-- 注意：这套版本组合适用于 JDK 1.8 -->

@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.platform.common.exception.BusinessException;
+import com.platform.competition.dto.CompetitionAuditDTO;
 import com.platform.competition.dto.CompetitionPublishDTO;
 import com.platform.competition.entity.Competition;
 import com.platform.competition.entity.Organizer;
@@ -12,6 +13,7 @@ import com.platform.competition.mapper.CompetitionMapper;
 import com.platform.competition.mapper.OrganizerMapper;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionAuditVO;
+import org.springframework.util.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,7 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         // 5. 保存到数据库
         this.save(competition);
     }
+
     /**
      * 实现内存组装逻辑：
      * 1. 查待审核列表
@@ -115,5 +118,43 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         voPage.setRecords(voList);
 
         return voPage;
+    }
+
+
+    @Override
+    public void auditCompetition(CompetitionAuditDTO dto) {
+        //1.通过数据库查询该记录
+        Competition competition = this.getById(dto.getId());
+        //2.基本校验:是否存在
+        if (competition == null) {
+            throw new BusinessException("未找到该竞赛信息");
+        }
+        //3.核心校验:防止重复审核，只有状态为0才可以审核
+        if (competition.getStatus() != 0) {
+            throw new BusinessException("该竞赛已被审核，请勿重复操作");
+        }
+        //4.准备更新对象(不需要使用全量更新)
+        Competition updateEntity = new Competition();
+        updateEntity.setId(competition.getId());
+        if (dto.getPass()) {
+            //情况A：审核通过
+            updateEntity.setStatus(1);
+            //将拒绝理由清空，表示通过(以防第一次被拒绝，第二次申请通过后及时清理)
+            updateEntity.setRejectReason("");
+        } else {
+            //情况B: 审核驳回
+            //驳回理由必填检查
+            if (!StringUtils.hasText(dto.getReason())) {
+                throw new BusinessException("驳回操作必须填写理由");
+            }
+            updateEntity.setStatus(2);
+            updateEntity.setRejectReason(dto.getReason());
+        }
+        //5. 执行数据库更新
+        this.updateById(updateEntity);
+        // 6. TODO 发送消息通知
+        // 这里预留位置，后续结合 Notification 服务发送 RabbitMQ 消息
+        // rabbitTemplate.convertAndSend("competition.audit", ...);
+        System.out.println(">>> 模拟发送通知: 竞赛ID=" + dto.getId() + " 审核结果=" + dto.getPass());
     }
 }
