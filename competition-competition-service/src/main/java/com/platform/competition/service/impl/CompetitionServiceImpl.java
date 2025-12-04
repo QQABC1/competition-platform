@@ -4,20 +4,28 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.competition.dto.CompetitionAuditDTO;
 import com.platform.competition.dto.CompetitionPublishDTO;
+import com.platform.competition.dto.CompetitionQueryDTO;
+import com.platform.competition.entity.Category;
 import com.platform.competition.entity.Competition;
 import com.platform.competition.entity.Organizer;
+import com.platform.competition.mapper.CategoryMapper;
 import com.platform.competition.mapper.CompetitionMapper;
 import com.platform.competition.mapper.OrganizerMapper;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionAuditVO;
+import com.platform.competition.vo.CompetitionListVO;
+import org.checkerframework.checker.units.qual.C;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +36,13 @@ import java.util.stream.Collectors;
 public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Competition> implements CompetitionService {
     @Autowired
     OrganizerMapper organizerMapper;
+
+    @Autowired
+    private CategoryMapper categoryMapper; // 用于查询分类名称
+    @Autowired
+    private StringRedisTemplate redisTemplate; // Redis操作
+    @Autowired
+    private ObjectMapper objectMapper; // Jackson序列化工具
 
     @Override
     public void publish(Long userId, CompetitionPublishDTO dto) {
@@ -120,7 +135,6 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         return voPage;
     }
 
-
     @Override
     public void auditCompetition(CompetitionAuditDTO dto) {
         //1.通过数据库查询该记录
@@ -156,5 +170,114 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         // 这里预留位置，后续结合 Notification 服务发送 RabbitMQ 消息
         // rabbitTemplate.convertAndSend("competition.audit", ...);
         System.out.println(">>> 模拟发送通知: 竞赛ID=" + dto.getId() + " 审核结果=" + dto.getPass());
+    }
+
+
+    @Override
+    public IPage<CompetitionListVO> getClientList(CompetitionQueryDTO queryDTO) {
+        // 1. 定义缓存 Key
+        String cacheKey = "competition:list:home:page1";
+        boolean isFirstPageNoFilter = isHomeFirstPage(queryDTO);
+
+        // 2. TODO 尝试查缓存 (仅限无筛选的第一页)
+        if (isFirstPageNoFilter) {
+            String cacheValue = redisTemplate.opsForValue().get(cacheKey);
+            if (StringUtils.hasText(cacheValue)) {
+                try {
+                    // 反序列化缓存数据返回 (这里为了简单，缓存整个 Page 对象结构比较麻烦，
+                    // 实际建议只缓存 List records，这里演示简化逻辑，假设缓存了 records)
+                    // 为保证代码健壮性，这里仅做逻辑示意，下面走数据库查询逻辑
+                } catch (Exception e) {
+                    // 缓存出错降级查库
+                }
+            }
+        }
+
+        // 3. 构建 MyBatis-Plus 查询条件
+        Page<Competition> pageParam = new Page<>(queryDTO.getPage(), queryDTO.getSize());
+        LambdaQueryWrapper<Competition> wrapper = new LambdaQueryWrapper<>();
+        // 3.1 基础条件：只查已发布(1)
+        wrapper.eq(Competition::getStatus, 1);
+        // 3.2 动态筛选
+        if(StringUtils.hasText(queryDTO.getKeyword())) {
+            wrapper.like(Competition::getTitle, queryDTO.getKeyword());
+        }
+        if(queryDTO.getCategoryId() != null) {
+            wrapper.eq(Competition::getCategoryId, queryDTO.getCategoryId());
+        }
+        if(queryDTO.getOrganizerId() != null) {
+            wrapper.eq(Competition::getOrganizerId, queryDTO.getOrganizerId());
+        }
+        // 3.3 时间状态筛选
+        LocalDateTime now = LocalDateTime.now();
+        if(queryDTO.getTimeStatus() != null) {
+            switch (queryDTO.getTimeStatus()) {
+                case 1:// 报名中: 开始 <= now <= 结束
+                    wrapper.le(Competition::getRegStartTime, now)
+                            .gt(Competition::getRegEndTime, now);
+                    break;
+                case 2:// 进行中: 比赛开始 <= now <= 比赛结束
+                    wrapper.le(Competition::getCompStartTime, now)
+                            .gt(Competition::getCompEndTime, now);
+                case 3:// 已结束: 比赛结束 < now
+                    wrapper.lt(Competition::getCompEndTime, now);
+                    break;
+            }
+        }
+        // 3.4 排序：置顶优先，其次按创建时间倒序
+        wrapper.orderByDesc(Competition::getIsTop)
+                .orderByDesc(Competition::getCreateTime);
+        // 4. 执行查询
+        Page<Competition> resultPage = this.page(pageParam, wrapper);
+        // 5. 转换 VO (Category Name 回填 + 状态文本计算)
+        // 5.1 批量查分类名称 (简单内存组装)
+        List<Category> categories = categoryMapper.selectList(null);
+        Map<Long, String> categoryMap = categories.stream()
+                .collect(Collectors.toMap(Category::getId, Category::getName));
+        List<CompetitionListVO> voList = resultPage.getRecords().stream().map(item -> {
+            CompetitionListVO vo = new CompetitionListVO();
+            BeanUtils.copyProperties(item, vo);
+            // 回填分类名
+            vo.setCategoryName(categoryMap.getOrDefault(item.getCategoryId(), "其他"));
+            // 转换置顶状态 (TINYINT -> Boolean)
+            vo.setIsTop((item.getIsTop() != null && item.getIsTop() == 1) ? 1 : 0);
+            // 计算状态文本
+            vo.setStatusText(calculateStatusText(item, now));
+
+            return vo;
+        }).collect(Collectors.toList());
+        // 6. 重新封装 Page
+        Page<CompetitionListVO> voPage = new Page<>();
+        BeanUtils.copyProperties(resultPage, voPage, "records");
+        voPage.setRecords(voList);
+        // 7. 写入缓存 (仅限无筛选第一页)
+        if (isFirstPageNoFilter) {
+            try {
+                // TODO缓存 10 分钟
+                // redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(voPage), 10, TimeUnit.MINUTES);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        return voPage;
+    }
+    // 辅助方法：判断是否为无筛选的首页
+    private boolean isHomeFirstPage(CompetitionQueryDTO dto) {
+        return dto.getPage() == 1 &&
+                !StringUtils.hasText(dto.getKeyword()) &&
+                dto.getCategoryId() == null &&
+                dto.getOrganizerId() == null &&
+                dto.getTimeStatus() == null;
+    }
+    // 辅助方法：判断是否为无筛选的首页
+    private String calculateStatusText(Competition item, LocalDateTime now) {
+        if(now.isBefore(item.getCreateTime())) {
+            return "报名中";
+        }else if (now.isAfter(item.getCompEndTime())){
+            return "已结束";
+        }else{
+            return "进行中";
+        }
     }
 }

@@ -61,6 +61,9 @@ public class Competition {
     @Schema(description = "发布人ID")
     private Long publisherId;
 
+    @Schema(description = "是否置顶: 0否, 1是")
+    private Integer isTop;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;
 
