@@ -8,6 +8,7 @@ import com.platform.competition.dto.CompetitionPublishDTO;
 import com.platform.competition.dto.CompetitionQueryDTO;
 import com.platform.competition.entity.Competition;
 import com.platform.competition.vo.CompetitionAuditVO;
+import com.platform.competition.vo.CompetitionDetailVO;
 import com.platform.competition.vo.CompetitionListVO;
 
 public interface CompetitionService extends IService<Competition> {
@@ -22,5 +23,17 @@ public interface CompetitionService extends IService<Competition> {
      */
     void auditCompetition(CompetitionAuditDTO dto);
 
+    /**
+     * 获取赛事列表首页广场
+     * @param queryDTO
+     * @return
+     */
     IPage<CompetitionListVO> getClientList(CompetitionQueryDTO queryDTO);
+
+    /**
+     * 展示竞赛详情
+     * @param id
+     * @return
+     */
+    CompetitionDetailVO getCompetitionDetail(Long id);
 }

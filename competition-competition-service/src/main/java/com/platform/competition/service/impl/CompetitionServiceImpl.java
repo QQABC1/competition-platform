@@ -17,6 +17,7 @@ import com.platform.competition.mapper.CompetitionMapper;
 import com.platform.competition.mapper.OrganizerMapper;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionAuditVO;
+import com.platform.competition.vo.CompetitionDetailVO;
 import com.platform.competition.vo.CompetitionListVO;
 import org.checkerframework.checker.units.qual.C;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -262,6 +263,59 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
 
         return voPage;
     }
+
+    // 详情页接口实现
+    @Override
+    public CompetitionDetailVO getCompetitionDetail(Long id) {
+        // 1. 查询数据库
+        Competition competition = this.getById(id);
+        // 2. 核心校验：是否存在 + 是否已发布
+        // 如果数据不存在，或者 status != 1 (1是已发布)，则视为404或无权访问
+        if (competition == null || competition.getStatus() != 1) {
+            throw new BusinessException("该竞赛不存在或已下架");
+        }
+
+        // 3. Redis 浏览量计数 (Key结构: competition:view:count:{id})
+        String viewCountKey = "competition:view:count:" + id;
+        // 使用 String 结构的 INCR 命令，原子递增，每次调用+1
+        Long viewCount = redisTemplate.opsForValue().increment(viewCountKey);
+
+        // 4. 对象转换 (Entity -> VO)
+        CompetitionDetailVO vo = new CompetitionDetailVO();
+        BeanUtils.copyProperties(competition, vo);
+        vo.setViewCount(viewCount); // 设置最新的浏览量
+
+        // 5. 补充关联名称 (Category & Organizer)
+        // TODO优化：如果有缓存最好，没有缓存就查DB。这里直接查DB演示。
+        if (competition.getCategoryId() != null) {
+            Category category = categoryMapper.selectById(competition.getCategoryId());
+            if (category != null) vo.setCategoryName(category.getName());
+        }
+        if (competition.getOrganizerId() != null) {
+            Organizer organizer = organizerMapper.selectById(competition.getOrganizerId());
+            if (organizer != null) vo.setOrganizerName(organizer.getName());
+        }
+
+        // 6. 核心逻辑：计算报名状态 (控制前端按钮)
+        LocalDateTime now = LocalDateTime.now();
+
+        if (now.isBefore(competition.getRegStartTime())) {
+            // 当前时间 < 报名开始时间
+            vo.setCanRegister(false);
+            vo.setRegStatusText("报名未开始");
+        } else if (now.isAfter(competition.getRegEndTime())) {
+            // 当前时间 > 报名结束时间
+            vo.setCanRegister(false);
+            vo.setRegStatusText("报名已截止");
+        } else {
+            // 在时间范围内
+            vo.setCanRegister(true);
+            vo.setRegStatusText("立即报名");
+        }
+
+        return vo;
+    }
+
     // 辅助方法：判断是否为无筛选的首页
     private boolean isHomeFirstPage(CompetitionQueryDTO dto) {
         return dto.getPage() == 1 &&
