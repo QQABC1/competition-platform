@@ -99,6 +99,11 @@
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
+        <dependency>
+            <groupId>com.platform</groupId>
+            <artifactId>competition-api</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
     <!-- (根据需要添加) MyBatis-Plus, MySQL, Lombok 等 -->
     </dependencies>
 

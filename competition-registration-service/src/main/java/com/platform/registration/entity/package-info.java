@@ -1,1 +1,0 @@
-package com.platform.registration.entity;
