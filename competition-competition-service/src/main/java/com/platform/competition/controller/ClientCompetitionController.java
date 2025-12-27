@@ -5,7 +5,7 @@ import com.platform.common.api.R;
 import com.platform.competition.dto.CompetitionQueryDTO;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionDetailVO;
-import com.platform.competition.vo.CompetitionListVO;
+import com.platform.competition.vo.CompetitionCListVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -22,9 +22,9 @@ public class ClientCompetitionController {
 
     @PostMapping("/list")
     @ApiOperation(value = "获取竞赛列表(分页+筛选)")
-    public R<IPage<CompetitionListVO>> getClientList(@RequestBody CompetitionQueryDTO queryDTO) {
+    public R<IPage<CompetitionCListVO>> getClientList(@RequestBody CompetitionQueryDTO queryDTO) {
 
-        IPage<CompetitionListVO> result = competitionService.getClientList(queryDTO);
+        IPage<CompetitionCListVO> result = competitionService.getClientList(queryDTO);
 
         return R.ok(result);
     }

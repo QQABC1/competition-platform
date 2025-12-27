@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.common.exception.BusinessException;
 import com.platform.competition.dto.CompetitionAuditDTO;
+import com.platform.competition.dto.CompetitionCreateDTO;
 import com.platform.competition.dto.CompetitionPublishDTO;
 import com.platform.competition.dto.CompetitionQueryDTO;
 import com.platform.competition.entity.Category;
@@ -18,8 +19,8 @@ import com.platform.competition.mapper.OrganizerMapper;
 import com.platform.competition.service.CompetitionService;
 import com.platform.competition.vo.CompetitionAuditVO;
 import com.platform.competition.vo.CompetitionDetailVO;
+import com.platform.competition.vo.CompetitionCListVO;
 import com.platform.competition.vo.CompetitionListVO;
-import org.checkerframework.checker.units.qual.C;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.beans.BeanUtils;
@@ -175,7 +176,7 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
 
 
     @Override
-    public IPage<CompetitionListVO> getClientList(CompetitionQueryDTO queryDTO) {
+    public IPage<CompetitionCListVO> getClientList(CompetitionQueryDTO queryDTO) {
         // 1. 定义缓存 Key
         String cacheKey = "competition:list:home:page1";
         boolean isFirstPageNoFilter = isHomeFirstPage(queryDTO);
@@ -200,18 +201,18 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         // 3.1 基础条件：只查已发布(1)
         wrapper.eq(Competition::getStatus, 1);
         // 3.2 动态筛选
-        if(StringUtils.hasText(queryDTO.getKeyword())) {
+        if (StringUtils.hasText(queryDTO.getKeyword())) {
             wrapper.like(Competition::getTitle, queryDTO.getKeyword());
         }
-        if(queryDTO.getCategoryId() != null) {
+        if (queryDTO.getCategoryId() != null) {
             wrapper.eq(Competition::getCategoryId, queryDTO.getCategoryId());
         }
-        if(queryDTO.getOrganizerId() != null) {
+        if (queryDTO.getOrganizerId() != null) {
             wrapper.eq(Competition::getOrganizerId, queryDTO.getOrganizerId());
         }
         // 3.3 时间状态筛选
         LocalDateTime now = LocalDateTime.now();
-        if(queryDTO.getTimeStatus() != null) {
+        if (queryDTO.getTimeStatus() != null) {
             switch (queryDTO.getTimeStatus()) {
                 case 1:// 报名中: 开始 <= now <= 结束
                     wrapper.le(Competition::getRegStartTime, now)
@@ -220,6 +221,7 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
                 case 2:// 进行中: 比赛开始 <= now <= 比赛结束
                     wrapper.le(Competition::getCompStartTime, now)
                             .gt(Competition::getCompEndTime, now);
+                    break;
                 case 3:// 已结束: 比赛结束 < now
                     wrapper.lt(Competition::getCompEndTime, now);
                     break;
@@ -235,8 +237,8 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         List<Category> categories = categoryMapper.selectList(null);
         Map<Long, String> categoryMap = categories.stream()
                 .collect(Collectors.toMap(Category::getId, Category::getName));
-        List<CompetitionListVO> voList = resultPage.getRecords().stream().map(item -> {
-            CompetitionListVO vo = new CompetitionListVO();
+        List<CompetitionCListVO> voList = resultPage.getRecords().stream().map(item -> {
+            CompetitionCListVO vo = new CompetitionCListVO();
             BeanUtils.copyProperties(item, vo);
             // 回填分类名
             vo.setCategoryName(categoryMap.getOrDefault(item.getCategoryId(), "其他"));
@@ -248,7 +250,7 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
             return vo;
         }).collect(Collectors.toList());
         // 6. 重新封装 Page
-        Page<CompetitionListVO> voPage = new Page<>();
+        Page<CompetitionCListVO> voPage = new Page<>();
         BeanUtils.copyProperties(resultPage, voPage, "records");
         voPage.setRecords(voList);
         // 7. 写入缓存 (仅限无筛选第一页)
@@ -316,6 +318,66 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
         return vo;
     }
 
+    @Override
+    public void createCompetition(Long userId, CompetitionCreateDTO dto) {
+        // 1. 简单的时间校验
+        if (dto.getRegEndTime().isBefore(dto.getRegStartTime())) {
+            throw new BusinessException("报名结束时间不能早于开始时间");
+        }
+
+        // 2. 转换实体
+        Competition competition = new Competition();
+        BeanUtils.copyProperties(dto, competition);
+
+        // 3. 填充系统字段
+        competition.setPublisherId(userId);
+        competition.setStatus(0); // 默认为待审核
+        competition.setIsTop(0);  // 默认不置顶
+        competition.setRegCount(0);
+
+        // 4. 保存
+        this.save(competition);
+    }
+
+    @Override
+    public IPage<CompetitionListVO> getMyCompetitionList(Page<Competition> pageParam, Long userId, Integer status, String keyword) {
+        // 1. 构建查询条件
+        LambdaQueryWrapper<Competition> wrapper = new LambdaQueryWrapper<>();
+
+        // 只能查自己发布的
+        wrapper.eq(Competition::getPublisherId, userId);
+
+        // 状态筛选 (如果传了)
+        wrapper.eq(status != null, Competition::getStatus, status);
+
+        // 关键词模糊搜索 (如果传了)
+        wrapper.like(StringUtils.hasText(keyword), Competition::getTitle, keyword);
+
+        // 排序：按创建时间倒序 (最新发布的在前)
+        wrapper.orderByDesc(Competition::getCreateTime);
+
+        // 2. 执行分页查询
+        Page<Competition> resultPage = this.page(pageParam, wrapper);
+
+        // 3. 转换 Entity -> VO
+        List<CompetitionListVO> voList = resultPage.getRecords().stream().map(item -> {
+            CompetitionListVO vo = new CompetitionListVO();
+            BeanUtils.copyProperties(item, vo);
+            // 这里因为数据库表里可能还没 reg_count，暂且手动置0，后续有了字段这里会自动copy
+            if (vo.getRegCount() == null) {
+                vo.setRegCount(0);
+            }
+            return vo;
+        }).collect(Collectors.toList());
+
+        // 4. 封装返回
+        Page<CompetitionListVO> voPage = new Page<>();
+        BeanUtils.copyProperties(resultPage, voPage, "records");
+        voPage.setRecords(voList);
+
+        return voPage;
+    }
+
     // 辅助方法：判断是否为无筛选的首页
     private boolean isHomeFirstPage(CompetitionQueryDTO dto) {
         return dto.getPage() == 1 &&
@@ -324,14 +386,26 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
                 dto.getOrganizerId() == null &&
                 dto.getTimeStatus() == null;
     }
+
     // 辅助方法：判断是否为无筛选的首页
     private String calculateStatusText(Competition item, LocalDateTime now) {
-        if(now.isBefore(item.getCreateTime())) {
+        // 1. 安全判空：如果核心时间字段为空，直接返回"未知"或"异常"
+        if (item.getRegStartTime() == null || item.getRegEndTime() == null ||
+                item.getCompStartTime() == null || item.getCompEndTime() == null) {
+            return "时间待定";
+        }
+
+        // 2. 状态判断逻辑
+        if (now.isBefore(item.getRegStartTime())) {
+            return "即将报名";
+        } else if (now.isBefore(item.getRegEndTime())) {
             return "报名中";
-        }else if (now.isAfter(item.getCompEndTime())){
-            return "已结束";
-        }else{
+        } else if (now.isBefore(item.getCompStartTime())) {
+            return "待比赛"; // 报名结束，比赛未开始
+        } else if (now.isBefore(item.getCompEndTime())) {
             return "进行中";
+        } else {
+            return "已结束";
         }
     }
 }

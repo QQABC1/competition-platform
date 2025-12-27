@@ -1,34 +1,31 @@
 package com.platform.competition.vo;
 
 import com.fasterxml.jackson.annotation.JsonFormat;
-import io.swagger.annotations.ApiModel;
-import io.swagger.annotations.ApiModelProperty;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@ApiModel(description = "C端竞赛列表展示对象")
+@Schema(description = "B端竞赛列表展示对象")
 public class CompetitionListVO {
 
-    @ApiModelProperty(value = "竞赛ID")
+    @Schema(description = "竞赛ID")
     private Long id;
 
-    @ApiModelProperty(value = "竞赛名称")
+    @Schema(description = "竞赛名称")
     private String title;
 
-    @ApiModelProperty(value = "封面图URL")
-    private String coverImg;
+    @Schema(description = "状态: 0:待审核, 1:已发布, 2:已驳回, 3:已结束")
+    private Integer status;
 
-    @ApiModelProperty(value = "分类名称")
-    private String categoryName;
+    // 如果数据库还没加这个字段，VO里先留着，逻辑层暂时填0
+    @Schema(description = "报名人数")
+    private Integer regCount;
 
-    @ApiModelProperty(value = "是否置顶")
-    private Integer isTop;
+    @Schema(description = "驳回理由 (仅状态为2时显示)")
+    private String rejectReason;
 
-    @ApiModelProperty(value = "状态文本(报名中/进行中/已结束)")
-    private String statusText;
-
-    @ApiModelProperty(value = "报名截止时间")
-    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
-    private LocalDateTime regEndTime;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    @Schema(description = "创建时间")
+    private LocalDateTime createTime;
 }

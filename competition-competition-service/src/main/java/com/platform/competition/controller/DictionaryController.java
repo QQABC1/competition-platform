@@ -38,7 +38,7 @@ public class DictionaryController {
         return R.ok(list);
     }
 
-    @GetMapping("/organizer/list")
+    @GetMapping("/organizer-list")
     @Operation(summary = "获取主办单位列表", description = "包含默认联系人和电话，支持前端自动填充")
     public R<List<Organizer>> getOrganizerList() {
         // 查询所有主办单位
