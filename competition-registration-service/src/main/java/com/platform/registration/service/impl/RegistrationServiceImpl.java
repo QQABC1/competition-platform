@@ -1,20 +1,29 @@
 package com.platform.registration.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.platform.api.client.RemoteUserService;
 import com.platform.api.domain.UserInternalVO;
 import com.platform.common.api.R;
 import com.platform.common.exception.BusinessException;
+import com.platform.registration.dto.RegistrationAuditDTO;
 import com.platform.registration.dto.RegistrationDTO;
+import com.platform.registration.dto.RegistrationQueryDTO;
 import com.platform.registration.entity.Registration;
 import com.platform.registration.mapper.RegistrationMapper;
 import com.platform.registration.service.RegistrationService;
 import com.platform.registration.vo.RegistrationInitVO;
+import com.platform.registration.vo.RegistrationListVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
+
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -26,6 +35,96 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
      */
     @Autowired
     private RemoteUserService remoteUserService;
+
+    // 实际项目中这里需要注入 UserFeignClient 来获取用户的学院信息
+    // @Autowired
+    // private UserFeignClient userFeignClient;
+
+    @Override
+    public IPage<RegistrationListVO> getOrganizerList(RegistrationQueryDTO queryDTO) {
+        // 1. 构造查询条件
+        Page<Registration> pageParam = new Page<>(queryDTO.getPage(), queryDTO.getSize());
+        LambdaQueryWrapper<Registration> wrapper = new LambdaQueryWrapper<>();
+
+        // 必须指定竞赛ID
+        if (queryDTO.getCompetitionId() == null) {
+            throw new BusinessException("竞赛ID不能为空");
+        }
+        wrapper.eq(Registration::getCompetitionId, queryDTO.getCompetitionId());
+
+        // 状态筛选
+        if (queryDTO.getStatus() != null) {
+            wrapper.eq(Registration::getStatus, queryDTO.getStatus());
+        }
+
+        // 关键词搜索 (姓名 或 学号)
+        if (StringUtils.hasText(queryDTO.getKeyword())) {
+            wrapper.and(w -> w.like(Registration::getStudentName, queryDTO.getKeyword())
+                    .or()
+                    .like(Registration::getStudentId, queryDTO.getKeyword()));
+        }
+
+        // 排序：时间倒序
+        wrapper.orderByDesc(Registration::getCreateTime);
+
+        // 2. 执行分页查询
+        Page<Registration> resultPage = this.page(pageParam, wrapper);
+
+        // 3. 转换 VO
+        List<RegistrationListVO> voList = resultPage.getRecords().stream().map(item -> {
+            RegistrationListVO vo = new RegistrationListVO();
+            BeanUtils.copyProperties(item, vo);
+
+            // TODO: 这里应该调用 UserFeignClient 获取学院信息
+            // UserVO user = userFeignClient.getById(item.getUserId());
+            // vo.setCollegeInfo(user != null ? user.getMajor() : "未知");
+            vo.setCollegeInfo("计算机学院 (演示数据)");
+
+            return vo;
+        }).collect(Collectors.toList());
+
+        // 4. 封装返回
+        Page<RegistrationListVO> voPage = new Page<>();
+        BeanUtils.copyProperties(resultPage, voPage, "records");
+        voPage.setRecords(voList);
+
+        return voPage;
+    }
+
+    @Override
+    public void auditRegistration(RegistrationAuditDTO dto) {
+        // 1. 查询记录
+        Registration reg = this.getById(dto.getId());
+        if (reg == null) {
+            throw new BusinessException("报名记录不存在");
+        }
+
+        // 2. 校验状态
+        if (reg.getStatus() == 0) {
+            throw new BusinessException("该报名已取消，无法审核");
+        }
+
+        // 3. 更新状态
+        Registration updateEntity = new Registration();
+        updateEntity.setId(dto.getId());
+
+        if (dto.getPass()) {
+            // 通过 -> 状态 2
+            updateEntity.setStatus(2);
+            updateEntity.setAuditReason("审核通过");
+        } else {
+            // 驳回 -> 状态 3
+            if (!StringUtils.hasText(dto.getReason())) {
+                throw new BusinessException("驳回必须填写理由");
+            }
+            updateEntity.setStatus(3);
+            updateEntity.setAuditReason(dto.getReason());
+        }
+
+        this.updateById(updateEntity);
+
+        // TODO: 发送消息通知学生 (MQ)
+    }
 
     /**
      * 获取报名初始化信息 (Pre-check)

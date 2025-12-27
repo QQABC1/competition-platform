@@ -1,10 +1,14 @@
 package com.platform.registration.controller;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.platform.common.api.R;
 import com.platform.common.exception.BusinessException;
+import com.platform.registration.dto.RegistrationAuditDTO;
 import com.platform.registration.dto.RegistrationDTO;
+import com.platform.registration.dto.RegistrationQueryDTO;
 import com.platform.registration.service.RegistrationService;
 import com.platform.registration.vo.RegistrationInitVO;
+import com.platform.registration.vo.RegistrationListVO;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import io.swagger.v3.oas.annotations.Operation;
@@ -51,6 +55,23 @@ public class RegistrationController {
 
         Long userId = getUserId(request);
         registrationService.apply(userId, dto);
+        return R.ok();
+    }
+
+    @GetMapping("/list")
+    @ApiOperation(value = "查看报名名单", notes = "支持按姓名/学号搜索")
+    public R<IPage<RegistrationListVO>> getList(RegistrationQueryDTO queryDTO) {
+        // queryDTO 中的参数会自动从 URL Query 中映射
+        IPage<RegistrationListVO> result = registrationService.getOrganizerList(queryDTO);
+        return R.ok(result);
+    }
+
+    @PutMapping("/audit")
+    @ApiOperation(value = "审核报名", notes = "通过或不通过")
+    public R<Void> audit(@RequestBody @Validated RegistrationAuditDTO dto) {
+
+        registrationService.auditRegistration(dto);
+
         return R.ok();
     }
 

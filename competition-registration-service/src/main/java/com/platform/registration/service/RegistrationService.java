@@ -1,9 +1,13 @@
 package com.platform.registration.service;
 
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.platform.registration.dto.RegistrationAuditDTO;
 import com.platform.registration.dto.RegistrationDTO;
+import com.platform.registration.dto.RegistrationQueryDTO;
 import com.platform.registration.entity.Registration;
 import com.platform.registration.vo.RegistrationInitVO;
+import com.platform.registration.vo.RegistrationListVO;
 
 /**
  * 报名服务接口
@@ -24,4 +28,10 @@ public interface RegistrationService extends IService<Registration> {
      * @param dto 提交的表单数据
      */
     void apply(Long userId, RegistrationDTO.Apply dto);
+
+    // 分页查询报名名单
+    IPage<RegistrationListVO> getOrganizerList(RegistrationQueryDTO queryDTO);
+
+    // 审核报名
+    void auditRegistration(RegistrationAuditDTO dto);
 }
