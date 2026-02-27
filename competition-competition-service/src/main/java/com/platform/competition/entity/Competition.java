@@ -16,8 +16,11 @@ public class Competition {
     @Schema(description = "竞赛名称")
     private String title;
 
-    @Schema(description = "报名人数")
+    @Schema(description = "已经报名人数")
     private Integer regCount;
+
+    @Schema(description = "报名人数上限")
+    private Integer maxCount;
 
     @Schema(description = "主办方ID")
     private Long organizerId;

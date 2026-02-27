@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.platform.common.constant.RedisKeyConstants;
 import com.platform.common.exception.BusinessException;
 import com.platform.competition.dto.CompetitionAuditDTO;
 import com.platform.competition.dto.CompetitionCreateDTO;
@@ -157,6 +158,14 @@ public class CompetitionServiceImpl extends ServiceImpl<CompetitionMapper, Compe
             updateEntity.setStatus(1);
             //将拒绝理由清空，表示通过(以防第一次被拒绝，第二次申请通过后及时清理)
             updateEntity.setRejectReason("");
+
+            // 审核通过后：预热竞赛容量到 Redis（comp:capacity:{compId}）
+            String capKey = RedisKeyConstants.CAPACITY_KEY_PREFIX + competition.getId();
+            // 约定：maxCount == null 或 <= 0 表示不限名额
+            int capacity = (competition.getMaxCount() == null || competition.getMaxCount() <= 0)
+                    ? 999999
+                    : competition.getMaxCount();
+            redisTemplate.opsForValue().set(capKey, String.valueOf(capacity));
         } else {
             //情况B: 审核驳回
             //驳回理由必填检查

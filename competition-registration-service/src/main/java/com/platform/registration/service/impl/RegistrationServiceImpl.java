@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.platform.api.client.RemoteUserService;
 import com.platform.api.domain.UserInternalVO;
 import com.platform.common.api.R;
+import com.platform.common.constant.RedisKeyConstants;
 import com.platform.common.exception.BusinessException;
 import com.platform.registration.dto.RegistrationAuditDTO;
 import com.platform.registration.dto.RegistrationDTO;
@@ -16,13 +17,19 @@ import com.platform.registration.mapper.RegistrationMapper;
 import com.platform.registration.service.RegistrationService;
 import com.platform.registration.vo.RegistrationInitVO;
 import com.platform.registration.vo.RegistrationListVO;
+import com.platform.registration.vo.RegistrationStatusVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -35,6 +42,13 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
      */
     @Autowired
     private RemoteUserService remoteUserService;
+
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    @Qualifier("registrationThreadPool")
+    private Executor threadPool;
 
     // 实际项目中这里需要注入 UserFeignClient 来获取用户的学院信息
     // @Autowired
@@ -209,5 +223,118 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         reg.setAttachment(dto.getAttachmentUrl());
 
         this.save(reg);
+    }
+
+
+    /**
+     * 高并发提交报名 (异步削峰)
+     */
+    @Override
+    public void applyAsync(Long userId, RegistrationDTO.Apply dto) {
+        Long compId = dto.getCompetitionId();
+
+        // Redis Keys 设计
+        String idempKey = RedisKeyConstants.IDEMPOTENT_KEY_PREFIX  + compId + ":" + userId; // 防重Key
+        String capKey = RedisKeyConstants.CAPACITY_KEY_PREFIX + compId;                     // 名额Key
+        String resKey = RedisKeyConstants.RESULT_KEY_PREFIX + compId + ":" + userId;  // 结果状态Key
+
+        // ================= 1. 第一道防线：幂等防重拦截 =================
+        // SETNX: 如果键不存在则设置成功(返回true)，存在则失败(返回false)。防连击、防重复提交。
+        Boolean isFirst = redisTemplate.opsForValue().setIfAbsent(idempKey, "1", 1, TimeUnit.HOURS);
+        if (Boolean.FALSE.equals(isFirst)) {
+            throw new BusinessException("您的报名正在处理中或已成功，请勿重复点击");
+        }
+
+        // ================= 2. 第二道防线：预扣减名额 (防超卖) =================
+        // 注意：竞赛发布时，必须提前将名额写入 capKey (即缓存预热)
+        Long remain = redisTemplate.opsForValue().decrement(capKey);
+        if (remain != null && remain < 0) {
+            // 扣减后小于0说明名额已满，必须立刻回滚！
+            redisTemplate.opsForValue().increment(capKey); // 把名额加回去
+            redisTemplate.delete(idempKey);                // 删除防重Key，允许别人继续试
+            throw new BusinessException("报名人数已满，请留意后续名额");
+        }
+
+        // ================= 3. 第三道防线：丢入线程池异步落库 =================
+        threadPool.execute(() -> {
+            try {
+                // 构建入库实体
+                Registration reg = new Registration();
+                BeanUtils.copyProperties(dto, reg);
+                reg.setUserId(userId);
+                reg.setCompetitionId(compId);
+                reg.setStatus(1); // 1: 待审核
+                reg.setAttachment(dto.getAttachmentUrl());
+
+                // TODO: 实际环境需调用 UserFeign 获取姓名学号快照
+                reg.setStudentName("测试姓名");
+                reg.setStudentId("测试学号");
+
+                // 执行落库 (DB IO 操作)
+                this.save(reg);
+
+                // 成功：将结果写入 Redis，供前端轮询查询
+                redisTemplate.opsForValue().set(resKey, "SUCCESS", 1, TimeUnit.HOURS);
+                log.info("异步落库成功: compId={}, userId={}", compId, userId);
+
+            } catch (DuplicateKeyException e) {
+                // 捕获唯一索引冲突 (兜底防止数据库重复)
+                log.warn("检测到重复报名: compId={}, userId={}", compId, userId);
+                compensateRollback(capKey, idempKey, resKey, "您已报名过该竞赛");
+            } catch (Exception e) {
+                // 发生未知异常 (如数据库宕机)
+                log.error("异步落库失败: compId={}, userId={}", compId, userId, e);
+                // 执行补偿与回滚！
+                compensateRollback(capKey, idempKey, resKey, "数据库繁忙，请重试");
+            }
+        });
+    }
+
+    /**
+     * 异常情况下的补偿回滚方法
+     */
+    private void compensateRollback(String capKey, String idempKey, String resKey, String errorMsg) {
+        // 1. 回滚名额
+        redisTemplate.opsForValue().increment(capKey);
+        // 2. 清除防重标识，允许用户稍后重试
+        redisTemplate.delete(idempKey);
+        // 3. 写入失败原因，通知前端
+        redisTemplate.opsForValue().set(resKey, "FAIL:" + errorMsg, 1, TimeUnit.HOURS);
+    }
+
+    /**
+     * 前端轮询查询报名结果
+     */
+    @Override
+    public RegistrationStatusVO getApplyStatus(Long userId, Long compId) {
+        String idempKey = RedisKeyConstants.IDEMPOTENT_KEY_PREFIX + compId + ":" + userId;
+        String resKey = RedisKeyConstants.RESULT_KEY_PREFIX + compId + ":" + userId;
+
+        RegistrationStatusVO vo = new RegistrationStatusVO();
+
+        // 1. 优先查结果 Key
+        String result = redisTemplate.opsForValue().get(resKey);
+        if ("SUCCESS".equals(result)) {
+            vo.setStatus(1);
+            vo.setMessage("报名成功！即将跳转...");
+            return vo;
+        } else if (result != null && result.startsWith("FAIL:")) {
+            vo.setStatus(-1);
+            vo.setMessage("报名失败：" + result.split(":")[1]); // 截取具体的失败原因
+            return vo;
+        }
+
+        // 2. 如果结果不存在，查防重 Key 是否存在
+        Boolean isProcessing = redisTemplate.hasKey(idempKey);
+        if (Boolean.TRUE.equals(isProcessing)) {
+            vo.setStatus(0);
+            vo.setMessage("系统正在飞速处理中，请稍候...");
+            return vo;
+        }
+
+        // 3. 两者都不存在
+        vo.setStatus(-1);
+        vo.setMessage("未查询到报名请求，请重新报名");
+        return vo;
     }
 }

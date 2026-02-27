@@ -8,6 +8,7 @@ import com.platform.registration.dto.RegistrationQueryDTO;
 import com.platform.registration.entity.Registration;
 import com.platform.registration.vo.RegistrationInitVO;
 import com.platform.registration.vo.RegistrationListVO;
+import com.platform.registration.vo.RegistrationStatusVO;
 
 /**
  * 报名服务接口
@@ -34,4 +35,19 @@ public interface RegistrationService extends IService<Registration> {
 
     // 审核报名
     void auditRegistration(RegistrationAuditDTO dto);
+
+    /**
+     * 高并发提交报名 (异步削峰)
+     * @param userId
+     * @param dto
+     */
+    void applyAsync(Long userId, RegistrationDTO.Apply dto);
+
+    /**
+     * 前端轮询查询报名结果
+     * @param userId
+     * @param compId
+     * @return
+     */
+    RegistrationStatusVO getApplyStatus(Long userId, Long compId);
 }
