@@ -152,7 +152,9 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
                 .setUserId(reg.getUserId()) // 假设实体里有userId
                 .setCompetitionId(reg.getCompetitionId()) // 假设实体里有competitionId
                 .setStatus(newStatus)
-                .setAuditReason(dto.getReason());
+                .setAuditReason(dto.getReason())
+                .setAuditTime(System.currentTimeMillis());
+
 
         // 发送消息到 RabbitMQ
         rabbitTemplate.convertAndSend(

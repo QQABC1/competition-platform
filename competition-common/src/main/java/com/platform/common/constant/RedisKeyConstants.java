@@ -31,4 +31,10 @@ public final class RedisKeyConstants {
      * 默认过期时间（秒）
      */
     public static final long DEFAULT_EXPIRE_SECONDS = 3600; // 1小时
+
+
+    /**
+     * 定义 Redis 防重 Key 的前缀
+      */
+    public static final String REDIS_IDEMPOTENT_PREFIX = "noti:audit:reg:";
 }

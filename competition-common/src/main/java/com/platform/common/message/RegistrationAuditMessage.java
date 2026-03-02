@@ -16,4 +16,5 @@ public class RegistrationAuditMessage  {
     private Long competitionId;   // 关联的竞赛ID
     private Integer status;       // 审核结果：2已通过, 3已驳回
     private String auditReason;   // 审核理由
+    private Long auditTime;     //审核时间戳
 }
