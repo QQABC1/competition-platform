@@ -7,8 +7,10 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.platform.api.client.RemoteUserService;
 import com.platform.api.domain.UserInternalVO;
 import com.platform.common.api.R;
+import com.platform.common.constant.RabbitMQConstants;
 import com.platform.common.constant.RedisKeyConstants;
 import com.platform.common.exception.BusinessException;
+import com.platform.common.message.RegistrationAuditMessage;
 import com.platform.registration.dto.RegistrationAuditDTO;
 import com.platform.registration.dto.RegistrationDTO;
 import com.platform.registration.dto.RegistrationQueryDTO;
@@ -19,6 +21,7 @@ import com.platform.registration.vo.RegistrationInitVO;
 import com.platform.registration.vo.RegistrationListVO;
 import com.platform.registration.vo.RegistrationStatusVO;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -45,6 +48,9 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
 
     @Autowired
     private StringRedisTemplate redisTemplate;
+
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
 
     @Autowired
     @Qualifier("registrationThreadPool")
@@ -122,10 +128,12 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
         Registration updateEntity = new Registration();
         updateEntity.setId(dto.getId());
 
+        int newStatus = 0;
         if (dto.getPass()) {
             // 通过 -> 状态 2
             updateEntity.setStatus(2);
             updateEntity.setAuditReason("审核通过");
+            newStatus = 2;
         } else {
             // 驳回 -> 状态 3
             if (!StringUtils.hasText(dto.getReason())) {
@@ -133,11 +141,25 @@ public class RegistrationServiceImpl extends ServiceImpl<RegistrationMapper, Reg
             }
             updateEntity.setStatus(3);
             updateEntity.setAuditReason(dto.getReason());
+            newStatus = 3;
         }
 
         this.updateById(updateEntity);
 
-        // TODO: 发送消息通知学生 (MQ)
+        //  构建并发送异步通知消息
+        RegistrationAuditMessage message = new RegistrationAuditMessage()
+                .setRegistrationId(reg.getId())
+                .setUserId(reg.getUserId()) // 假设实体里有userId
+                .setCompetitionId(reg.getCompetitionId()) // 假设实体里有competitionId
+                .setStatus(newStatus)
+                .setAuditReason(dto.getReason());
+
+        // 发送消息到 RabbitMQ
+        rabbitTemplate.convertAndSend(
+                RabbitMQConstants.NOTIFICATION_EXCHANGE,
+                RabbitMQConstants.REGISTRATION_AUDIT_ROUTING_KEY,
+                message
+        );
     }
 
     /**
